@@ -1,0 +1,271 @@
+%Facultad de Tecnologia y Ciencias Aplicadas|UNCA
+% Carrizo Vizzoni Facundo Nahuel
+%Matricula:00912
+
+%% Controlador en VE motor DC (Inciso 1, Caso de estudio 2|TP2)
+clc; clear;
+
+%% Inicializacion de variables para simulacion
+t_paso=1e-5; tf=0.45; theta_refv=pi/2; %referencia 1 radian del enunciado
+k=3; X=[0;0;0]; u=0; Tap=0;
+TL_max=0.0021; %Dato del excel, item 5
+P=round(tf/t_paso);%Paso, da la cantidad de elementos necesarios para
+%armar los vectores de las variables en funcion de los parametros elegidos
+%Inicializacion de variables
+X1=zeros(P,1);%Vector Corriente
+X2=zeros(P,1);%V. Posicion
+X3=zeros(P,1);%Vector Velocidad angular
+error=zeros(P+2,1);
+accion=zeros(P,1);
+TL=zeros(P,1);
+theta_ref=zeros(P,1);
+
+
+%% Constantes empiricas del PID (empezamos con las recomendadas)
+%KP=01; KI=0.01; KD=5; %Recomendadas
+KP=10; KI=150; KD=0.00001;
+Ts=t_paso;%Cambio a tiempo de muestreo
+
+%Coeficientes del PID discreto
+A=((2*KP*Ts)+(KI*Ts^2)+(2*KD))/(2*Ts);
+B=((-2*KP*Ts)+(KI*Ts^2)-(4*KD))/(2*Ts);
+C=KD/Ts;
+
+%% Simulacion usando el controlador PID
+for t=1:P
+    %Aplicacion del torque maximo para un t>=0.7s
+    t_act=(t-1)*t_paso;
+    if (t_act>0.07) %0.5
+        Tap=TL_max;
+    end
+    if (t_act<=0.15) %0.15
+        theta_refv=pi/2;
+    end
+    if (t_act>0.15 && t_act<=0.3) %1
+        theta_refv=-pi/2;Tap=0;
+    end
+    if (t_act>0.3 && t_act<=0.45) %1
+        theta_refv=pi/2;Tap=0;
+    end
+    if (t_act>0.35)
+        Tap=TL_max;
+    end
+
+X=modmotor(t_paso, X, [u;Tap]);%Invocacion de la funcion de modelado del motor
+%que devuelve las variables de estado usando Euler, se envian tres
+%parametros el t. de paso, las variables "anteriores" y accion de control
+%junto con perturbacion
+
+error(k)= theta_refv-X(2);%Actualizacion de la señal de error
+u=u+A*error(k)+B*error(k-1)+C*error(k-2);%Actualizacion de la accion de
+%control del PID
+X1(t)=X(1);%Corriente
+X2(t)=X(2);%Posicion angular
+X3(t)=X(3);%Velocidad angular
+accion(t)=u;%Accion de control
+TL(t)=Tap;%Perturbacion, torque aplciado
+theta_ref(t)=theta_refv;%Referencia
+k=k+1;%actualiza la muestra del PID
+end
+tiempo=linspace(0,tf,P);%Base de tiempos para plot
+
+%% Graficas para observar el funcionamiento del PID
+figure(1)
+subplot(5, 1, 1);
+plot(tiempo, X2, 'b', tiempo, theta_ref, 'r--');
+legend('Controlador', 'Referencia');
+title('Posición angular');
+xlabel('Tiempo (s)');
+ylabel('Ángulo [rad]');
+grid on;
+
+subplot(5, 1, 2);
+plot(tiempo, X3);
+title('Velocidad angular');
+xlabel('Tiempo [s]');
+ylabel('Velocidad [rad/s]');
+grid on;
+
+subplot(5, 1, 3);
+plot(tiempo, X1);
+title('Corriente');
+xlabel('Tiempo [s]');
+ylabel('Corriente [A]');
+grid on;
+
+subplot(5, 1, 4);
+plot(tiempo, accion);
+title('Accion de control');
+xlabel('Tiempo [s]');
+ylabel('Tension [V]');
+grid on;
+
+subplot(5, 1, 5);
+plot(tiempo, TL);
+title('Torque aplicado');
+xlabel('Tiempo [s]');
+ylabel('Torque [Nm]');
+grid on;
+
+%% Calculo de autovectores para definir tiempo de integracion
+
+% Matrices y constantes del motor
+
+La=366e-6; Jm=5e-9; Ra=55.6; Bm=0; Ki=6.49e-3; Km=6.53e-3;
+
+A=[(-Ra/La) 0 (-Km/La);0 0 1; (Ki/Jm) 0 (-Bm/Jm) ];
+B=[1/La ;0 ;0]; BT=[0;0;-1/Jm];
+C=[0 1 0;0 0 1]; D=0;
+%Se uso como variables de estado x1=ia(t), x2=theta(t) y x3=w(t) obteniendo
+%asi las matrices A, B y C definidas anteriormente
+
+val = eig(A);
+% Mostrar resultados
+disp('Autovalores de la Matriz A:');
+disp(val);
+t_euler=log(0.95)/(1.0e+05*-1.5176);
+disp('Tiempo de integracion:');
+disp(t_euler);
+%% Controlador en variable de estado
+P_deseados=[-20e3;-20e3; -1e4;-1e2];
+%Se utilizan 4 debido a que se controlan 4 estados diferentes, los 3
+%originales sumado el de integracion de psi
+
+%Construccion de las matrices ampliadas
+Aa=[A,[0;0;0];-C(1,:),0];
+Ba=[B;0];
+tol=1e-06;
+M_C=[Ba Aa*Ba Aa^2*Ba Aa^3*Ba]; %Matriz de controlabilidad
+rango=rank(M_C,tol);
+if rango>3
+    disp("El sistema es completamente controlable")
+else
+disp("El sistema no es completamente controlable.")
+end
+coef=poly(eig(Aa));
+alfa=poly(P_deseados);
+W= [coef(4) coef(3) coef(2) 1;
+    coef(3) coef(2) 1 0;
+    coef(2) 1 0 0;
+    1 0 0 0];
+T=M_C*W;
+Ka=fliplr(alfa(2:length(alfa))-coef(2:length(coef)))*inv(T);%Controlador usando A.P.
+eig(Aa-Ba*Ka)%Comprobacion; debe dar igual a los polos deseados
+Q=diag([2e-2 1e-5 1e-5  1e5]);
+R=1e-5;
+Ka=lqr(Aa,Ba,Q,R);%Controlador usando LQR
+
+%% Observador
+%Para calcular el observador empezamos armando el sistema dual
+A_dual=A';  C_dual=B';
+hh=[0.5;0.5];%Matriz de peso para calcular el observador por A.P. usando el S.D.
+B_dual=C'*hh;
+P_deseados_obs=[-3.33e4;-2e2; -0.07e1];
+M_Cdual= [B_dual A_dual*B_dual A_dual^2*B_dual];
+rango=rank(M_Cdual);%Para verificar no mas, el rango debe ser 3
+coef_ob=poly(eig(A_dual));
+W_dual=[coef_ob(3) coef_ob(2) 1;
+    coef_ob(2) 1 0;
+    1 0 0];
+T_dual=M_Cdual*W_dual;
+alfa_o=poly(P_deseados_obs);
+Kdual=fliplr(alfa_o(2:length(alfa_o))-coef_ob(2:length(coef_ob)))*inv(T_dual);
+%Usa la formula de Ackerman para calcular el Kdual [A.P.]
+eig(A_dual-B_dual*Kdual);%Debe ser igual a los polos deseados del observador, SOLO PARA VERIFICAR
+%Kobs=(hh*Kdual)';%K observador usando A.P.
+Qo=diag([2e-2 1e0 1e3]);
+Ro=diag([1e-5, 1e-5]);
+Kobs=(lqr(A',C',Qo,Ro))'; %K observador usando LQR
+eig(A-Kobs*C);%Solo para verificar
+%% Simulacion con observacion de estados
+X=[0;0;0];% Vector de estados completo
+Tap=0;
+psi=0; u=0;
+xhat=[0;0;0];%Para observacion de estados, solo mide theta y omega
+error=zeros(P,1);
+k=2; ii=0;
+um=22;
+Xhat1 = zeros(P, 1); % Vector para la corriente estimada
+for t=1:P
+    ii=ii+1;
+    k=k+1;
+    t_act=(t-1)*t_paso;
+    if (t_act>0.07) %0.5
+        Tap=TL_max;
+    end
+    if (t_act<=0.15) %0.15
+        theta_refv=pi/2;
+    end
+    if (t_act>0.15 && t_act<=0.3) %1
+        theta_refv=-pi/2;Tap=0;
+    end
+    if (t_act>0.3 && t_act<=0.45) %1
+        theta_refv=pi/2;Tap=0;
+    end
+    if (t_act>0.35)
+        Tap=TL_max;
+    end
+    Y=C*X;
+X=modmotor(t_paso, X, [u;Tap]);
+error(k)=theta_refv-Y(1);
+
+u=-Ka *[X;psi]; %Sin observacion de estados
+% u=-Ka*[xhat;psi]; %Usando observacion de estados
+ui=u;
+if (abs(ui)<um)
+    u=0;
+else
+    u=ui-um*sign(u);
+end
+xhat_p=A*xhat+B*u + Kobs*(Y-C*xhat);
+% xhat_p = A*xhat + B*u + BT*Tap + Kobs*(Y-C*xhat);
+xhat=xhat+xhat_p*t_paso;
+psi=psi+error(k)*t_paso;
+X1(t)=X(1);%Corriente
+X2(t)=X(2);%Posicion angular
+X3(t)=X(3);%Velocidad angular
+accion(t)=u;%Accion de control
+accion_ndz(t)=ui;
+TL(t)=Tap;%Perturbacion, torque aplciado
+theta_ref(t)=theta_refv;%Referencia
+Xhat1(t) = xhat(1);
+end
+tiempo=linspace(0,tf,P);
+
+%% Resultados
+figure(2)
+subplot(5, 1, 1);
+plot(tiempo, X2, 'b', tiempo, theta_ref, 'r--');
+legend('Controlador por realimentacion de estados, LQR', 'Referencia');
+title('Posición angular');
+xlabel('Tiempo (s)');
+ylabel('Ángulo [rad]');
+grid on;
+
+subplot(5, 1, 2);
+plot(tiempo, X3);
+title('Velocidad angular');
+xlabel('Tiempo [s]');
+ylabel('Velocidad [rad/s]');
+grid on;
+
+subplot(5, 1, 3);
+plot(tiempo, X1,tiempo, Xhat1);
+title('Corriente'); legend('Corriente', 'Corriente reconstruida')
+xlabel('Tiempo [s]');
+ylabel('Corriente [A]');
+grid on;
+
+subplot(5, 1, 4);
+plot(tiempo, accion, tiempo, accion_ndz);
+title('Accion de control');legend('Sin zona muerta','Con zona muerta');
+xlabel('Tiempo [s]');
+ylabel('Tension [V]');
+grid on;
+
+subplot(5, 1, 5);
+plot(tiempo, TL);
+title('Torque aplicado');
+xlabel('Tiempo [s]');
+ylabel('Torque [Nm]');
+grid on;

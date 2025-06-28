@@ -1,0 +1,167 @@
+%Facultad de Tecnologia y Ciencias Aplicadas|UNCA
+% Carrizo Vizzoni Facundo Nahuel
+%Matricula:00912
+
+%% Controlador en VE pendulo invertido (Inciso 3, Caso de estudio 2|TP2)
+clc; clear; close;
+TamanioFuente=15;
+colorc='k'; colorl='k';
+colorv='b'; colorvf='b';
+%% Definicion de constantes
+m=0.1; F=0.1; l=1.6;
+g=9.8; M=1.5; m2=1;
+alfa(1)=pi;
+%Modelo estable linealizado en Xop
+Ae=[0 1 0 0;
+    0 -F/M -m*g/M 0;
+    0 0 0 1;
+    0 -F/(l*M) -g*(m+M)/(l*M) 0];
+Be=[0; 1/M; 0; 1/(l*M)];
+xOP=[0;0;pi;0];
+Ce=[1 0 0 0;0 0 1 0];
+%% Calculo del controlador
+
+%Se construye el sistema ampliado
+Aa=[Ae,[0;0;0;0];-Ce(1,:),0];
+Ba=[Be;0];
+Qa=diag([1e-4 1e1 1e6 1e4 5e5]);Ra=1e5;
+Ka=lqr(Aa,Ba,Qa,Ra);
+disp('Polos del controlador ida');
+disp(eig(Aa-Ba*Ka));
+
+%% Calculo del observador
+A_dual=Ae';  
+C_dual=Be';
+B_dual=Ce';
+Qo=diag([1e1 1 1e2 1]);
+Ro=diag([1e-2, 1e-1]);
+Kobs=lqr(Ae',Ce',Qo,Ro)';
+disp('Polos del observador ida');
+disp(eig(Ae-Kobs*Ce));
+
+%% Simulacion
+Ts = 1e-3;T=30;
+KMAX=round(T/Ts);
+t=0; x=[0;0;alfa(1);0];
+p(1)=x(1); p_p(1)=x(2); alfa(1)=x(3); omega(1)=x(4);
+
+
+x=[0;0;alfa(1);0];
+h=Ts;ref=10;tita_pp=0;xhat=[0;0;0;0];
+um=2; %ZONA MUERTA
+psi(1) = 0;
+u = zeros(1, KMAX);
+acci = zeros(1, KMAX);
+psi = zeros(1, KMAX);
+K=Ka(1:4); KI=-Ka(5);
+for ki=1:KMAX
+    estado=[p(ki); p_p(ki); alfa(ki); omega(ki)];
+    Y_=Ce*estado;
+    psi_p=ref-Ce(1,:)*estado;
+    psi(ki+1)=psi(ki)+psi_p*h;
+    u(ki)=-K*(xhat-xOP)+KI*psi(ki+1);
+    % u(ki)=-K*(estado-xOP)+KI*psi(ki+1);
+
+    %Zona muerta
+    ui=u(ki);    
+    acci(ki)=ui;
+    if abs(ui)<um
+        u(ki)=0;
+    else
+        u(ki)=ui-um*sign(u(ki));
+    end    
+    %fin zona muerta
+    p_pp=(1/(M+m))*(u(ki)-m*l*tita_pp*cos(alfa(ki))+m*l*omega(ki)^2*sin(alfa(ki))-F*p_p(ki));
+    tita_pp=(1/l)*(g*sin(alfa(ki))-p_pp*cos(alfa(ki)));
+    p_p(ki+1)=p_p(ki)+h*p_pp;
+    p(ki+1)=p(ki)+h*p_p(ki);
+    omega(ki+1)=omega(ki)+h*tita_pp;
+    alfa(ki+1)=alfa(ki)+h*omega(ki);
+
+    xhat_p=Ae*xhat+Be*u(ki) + Kobs*(Y_-Ce*xhat);
+    xhat=xhat+xhat_p*h;
+end
+
+%% Matrices para la vuelta del carro
+
+%Modelo estable linealizado en Xop
+Ae=[0 1 0 0;
+    0 -F/M -m2*g/M 0;
+    0 0 0 1;
+    0 -F/(l*M) -g*(m2+M)/(l*M) 0];
+Be=[0; 1/M; 0; 1/(l*M)];
+xOP=[0;0;pi;0];
+Ce=[1 0 0 0;0 0 1 0];
+
+%% Calculo del controlador (vuelta)
+
+%Se construye el sistema ampliado
+Aa=[Ae,[0;0;0;0];-Ce(1,:),0];
+Ba=[Be;0];
+Qav=diag([1e1 1e1 1e6 1e4 1e4]);Rav=1e5;
+Kav=lqr(Aa,Ba,Qav,Rav);
+disp('Polos del controlador vuelta');
+disp(eig(Aa-Ba*Kav));
+
+%% Calculo del observador (vuelta)
+A_dual=Ae';  
+C_dual=Be';
+B_dual=Ce';
+Qov=diag([1e2 1e3 1e2 1e3]);
+Rov=diag([1e-2, 1e-1]);
+Kobsv=lqr(Ae',Ce',Qov,Rov)';
+disp('Polos del observador vuelta');
+disp(eig(Ae-Kobsv*Ce));
+t=0:h:T;
+
+%% Simulacion vuelta
+
+pv(1)=p(end); p_pv(1)=p_p(end); alfav(1)=alfa(end); omegav(1)=omega(end);
+
+x=[0;0;alfav(1);0];
+h=Ts;ref=0;tita_ppv=0;xhatv=[pv(1);p_pv(1);alfav(1);omegav(1)];
+um=2; %Zona muerta
+psiv(1) = 0;
+uv = zeros(1, KMAX);
+acciv = zeros(1, KMAX);
+psiv = zeros(1, KMAX);
+Kv=Kav(1:4); KIv=-Kav(5);
+for ki=1:KMAX
+    estadov=[pv(ki); p_pv(ki); alfav(ki); omegav(ki)];
+    Y_=Ce*estadov;
+    psi_p=ref-Ce(1,:)*estadov;
+    psiv(ki+1)=psiv(ki)+psi_p*h;
+    uv(ki)=-Kv*(xhatv-xOP)+KIv*psiv(ki+1);
+    %uv(ki)=-K*(estado-xOP)+KI*psi(ki+1); %Sin observador de estados
+    %Zona muerta
+    ui=uv(ki);    
+    acciv(ki)=ui;
+    if abs(ui)<um %um es zona muerta
+        uv(ki)=0;
+    else
+        uv(ki)=ui-um*sign(uv(ki));
+    end    
+    %fin zona muerta
+    p_pp=(1/(M+m2))*(uv(ki)-m2*l*tita_ppv*cos(alfav(ki))+m2*l*omegav(ki)^2*sin(alfav(ki))-F*p_pv(ki));
+    tita_ppv=(1/l)*(g*sin(alfav(ki))-p_pp*cos(alfav(ki)));
+    p_pv(ki+1)=p_pv(ki)+h*p_pp;
+    pv(ki+1)=pv(ki)+h*p_pv(ki);
+    omegav(ki+1)=omegav(ki)+h*tita_ppv;
+    alfav(ki+1)=alfav(ki)+h*omegav(ki);
+
+    xhat_p=Ae*xhatv+Be*uv(ki) + Kobsv*(Y_-Ce*xhatv);
+    xhatv=xhatv+xhat_p*h;
+end
+
+figure(1);hold on;
+subplot(3,2,1);plot(t,alfav,colorc, t, alfa,colorv);grid on;title('\phi_t','FontSize',TamanioFuente);hold on;
+legend('Vuelta', 'Ida');
+subplot(3,2,2);plot(t,omegav,colorc, t,omega,colorv);grid on;
+legend('Vuelta', 'Ida');
+title('$\dot{\phi_t}$','Interpreter','latex','FontSize',TamanioFuente);hold on;
+subplot(3,2,3); plot(t,pv,colorc, t, p, colorv);grid on;title('\delta_t','FontSize',TamanioFuente);hold on;
+legend('Vuelta', 'Ida');
+subplot(3,2,4);plot(t,p_pv,colorc, t,p_p,colorv);grid on;title('$\dot{\delta_t}$','Interpreter','latex','FontSize',TamanioFuente);hold on;
+legend('Vuelta', 'Ida');
+subplot(3,1,3);plot(t(1:end-1),uv,"r",t(1:end-1),acciv,'k',t(1:end-1),u,"g",t(1:end-1),acci,'b');grid on;title('Acción de control','FontSize',TamanioFuente);xlabel('Tiempo en Seg.','FontSize',TamanioFuente);hold on;
+legend('Con zona muerta (ida)','Sin zona muerta (ida)', "Con zona muerta (vuelta)", "Sin zona muerta (vuelta)");
